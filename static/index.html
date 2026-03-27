@@ -1,1 +1,241 @@
+<!DOCTYPE html>
+<html lang="it">
 
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recipe Finder - AI Kitchen</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+
+        .font-serif {
+            font-family: 'DM Serif Display', serif;
+        }
+
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body class="bg-[#f8f7f4] text-slate-800 min-h-screen">
+
+    <nav class="max-w-6xl mx-auto px-6 py-6 flex justify-between items-center">
+        <div class="flex items-center gap-2 cursor-pointer" onclick="location.reload()">
+            <span class="text-2xl">🍳</span>
+            <span class="font-serif text-xl text-green-900 font-bold">Recipe Finder</span>
+        </div>
+        <button onclick="showBookmarks()"
+            class="text-slate-600 hover:text-green-800 flex items-center gap-2 font-medium">
+            🔖 <span>Salvate</span>
+        </button>
+    </nav>
+
+    <div class="max-w-4xl mx-auto py-8 px-6">
+        <h1 id="main-title" class="text-5xl font-serif font-bold text-green-900 mb-4">Cosa c'è in frigo?</h1>
+        <p id="main-desc" class="text-lg text-slate-600 mb-10">Inserisci i tuoi ingredienti e l'IA creerà 4 ricette
+            istantanee.</p>
+
+        <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 mb-12">
+            <div class="flex gap-3 mb-6">
+                <input id="ing-input" type="text" placeholder="es. tonno, uova, pasta..."
+                    class="flex-1 border-2 border-slate-50 rounded-xl px-5 py-3 outline-none focus:border-green-500 transition bg-slate-50">
+                <button onclick="addIngredient()"
+                    class="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-900 transition shadow-md">Aggiungi</button>
+            </div>
+
+            <div id="tags-container" class="flex flex-wrap gap-2 mb-8"></div>
+
+            <button onclick="getRecipes()" id="btn-suggest"
+                class="w-full bg-green-800 text-white py-4 rounded-2xl font-bold text-lg hover:bg-green-900 transition-all shadow-lg flex items-center justify-center gap-3">
+                <span id="btn-text">✨ Suggerisci Ricette</span>
+            </button>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <div class="flex justify-between items-end mb-8 border-b pb-4">
+                <h2 class="text-2xl font-serif font-bold text-green-900">Le tue opzioni</h2>
+                <p id="recipe-count" class="text-slate-500 text-sm italic"></p>
+            </div>
+            <div id="recipes-grid" class="grid md:grid-cols-2 gap-8"></div>
+        </div>
+    </div>
+
+    <div id="modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-y-auto relative shadow-2xl">
+            <button onclick="closeModal()"
+                class="absolute top-6 right-6 text-3xl text-slate-400 hover:text-slate-900 z-10">&times;</button>
+            <div id="modal-content" class="p-8 md:p-12"></div>
+        </div>
+    </div>
+
+    <script>
+        let ingredients = [];
+        let currentRecipes = []; // Memoria volatile per le ricette caricate
+        let bookmarks = JSON.parse(localStorage.getItem('my_recipes_v1') || '[]');
+
+        // --- AGGIUNTA TAG ---
+        function addIngredient() {
+            const input = document.getElementById('ing-input');
+            const val = input.value.trim().toLowerCase();
+            if (val && !ingredients.includes(val)) {
+                ingredients.push(val);
+                renderTags();
+            }
+            input.value = '';
+        }
+
+        document.getElementById('ing-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') addIngredient(); });
+
+        function renderTags() {
+            const container = document.getElementById('tags-container');
+            container.innerHTML = ingredients.map(ing => `
+                <span class="bg-white border px-4 py-2 rounded-full flex items-center gap-3 text-sm font-semibold shadow-sm border-slate-200">
+                    ${ing} 
+                    <button onclick="removeIng('${ing}')" class="text-slate-300 hover:text-red-500">✕</button>
+                </span>
+            `).join('');
+        }
+
+        function removeIng(ing) {
+            ingredients = ingredients.filter(i => i !== ing);
+            renderTags();
+        }
+
+        // --- CHIAMATA SERVER ---
+        async function getRecipes() {
+            if (ingredients.length === 0) return;
+
+            const btn = document.getElementById('btn-suggest');
+            const btnText = document.getElementById('btn-text');
+            btnText.innerText = "L'IA sta cucinando...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/suggest-recipes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ingredients })
+                });
+
+                const data = await res.json();
+                // Normalizzazione risposta
+                currentRecipes = Array.isArray(data) ? data : (data.recipes || []);
+
+                if (currentRecipes.length > 0) {
+                    displayRecipes(currentRecipes);
+                }
+            } catch (e) {
+                alert("Errore durante la ricerca.");
+            } finally {
+                btnText.innerText = "✨ Suggerisci Ricette";
+                btn.disabled = false;
+            }
+        }
+
+        // --- RENDER SCHEDE (Senza passare oggetti nell'HTML) ---
+        function displayRecipes(recipes) {
+            const grid = document.getElementById('recipes-grid');
+            document.getElementById('results-section').classList.remove('hidden');
+            document.getElementById('recipe-count').innerText = `${recipes.length} ricette generate`;
+
+            const img = "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=600";
+
+            grid.innerHTML = recipes.map((r, i) => {
+                const isSaved = bookmarks.some(b => b.title === r.title);
+                return `
+                    <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 group cursor-pointer transition-all hover:shadow-xl hover:-translate-y-1" 
+                         onclick="openRecipe(${i})">
+                        <img src="${img}" class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-700">
+                        <div class="p-6">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-bold text-xl text-slate-800 leading-tight group-hover:text-green-800">${r.title}</h3>
+                                <button onclick="event.stopPropagation(); toggleBookmark(${i})" class="text-2xl">
+                                    ${isSaved ? '🔖' : '📑'}
+                                </button>
+                            </div>
+                            <p class="text-slate-500 text-sm line-clamp-2 mb-4">${r.description || ''}</p>
+                            <div class="flex gap-2">
+                                <span class="bg-slate-100 text-[10px] font-bold px-2 py-1 rounded-md uppercase text-slate-500">${r.cook_time || '20 min'}</span>
+                                <span class="bg-green-50 text-green-700 text-[10px] font-bold px-2 py-1 rounded-md uppercase">${r.difficulty || 'Easy'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- MODALE ---
+        function openRecipe(index) {
+            const r = currentRecipes[index];
+            const modal = document.getElementById('modal');
+            const content = document.getElementById('modal-content');
+
+            content.innerHTML = `
+                <div class="mb-8">
+                    <h2 class="text-4xl font-serif font-bold text-green-900 mb-3">${r.title}</h2>
+                    <p class="text-slate-600 italic text-lg leading-relaxed">${r.description || ''}</p>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-10 mt-10">
+                    <div class="bg-slate-50 p-6 rounded-2xl">
+                        <h4 class="text-lg font-bold mb-4 flex items-center gap-2 text-green-800">🛒 Ingredienti</h4>
+                        <ul class="space-y-2">
+                            ${r.ingredients.map(ing => `<li class="text-slate-700 flex items-center gap-2"><span class="w-1.5 h-1.5 bg-green-400 rounded-full"></span> ${ing}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="text-lg font-bold mb-4 flex items-center gap-2 text-green-800">👨‍🍳 Procedimento</h4>
+                        <ol class="space-y-5">
+                            ${r.instructions.map((step, i) => `
+                                <li class="flex gap-3">
+                                    <span class="font-bold text-green-800">${i + 1}.</span>
+                                    <p class="text-slate-700 leading-snug">${step}</p>
+                                </li>
+                            `).join('')}
+                        </ol>
+                    </div>
+                </div>
+            `;
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
+        }
+
+        // --- LOGICA SEGNALIBRI ---
+        function toggleBookmark(index) {
+            const recipe = currentRecipes[index];
+            const bIndex = bookmarks.findIndex(b => b.title === recipe.title);
+
+            if (bIndex === -1) {
+                bookmarks.push(recipe);
+            } else {
+                bookmarks.splice(bIndex, 1);
+            }
+
+            localStorage.setItem('my_recipes_v1', JSON.stringify(bookmarks));
+            displayRecipes(currentRecipes); // Aggiorna graficamente
+        }
+
+        function showBookmarks() {
+            if (bookmarks.length === 0) return alert("Nessuna ricetta salvata.");
+            currentRecipes = bookmarks; // Impostiamo i segnalibri come "vista corrente"
+            displayRecipes(currentRecipes);
+            document.getElementById('main-title').innerText = "Le tue salvate";
+            document.getElementById('main-desc').innerText = "Ricette che hai deciso di conservare.";
+        }
+    </script>
+</body>
+
+</html>
